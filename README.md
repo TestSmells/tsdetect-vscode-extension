@@ -249,8 +249,8 @@ npm run test:corpus
 npm run package:vsix
 ```
 
-The tests expect compiled JavaScript under `out/`, so run `npm run compile`
-before running them individually. Packaging creates
+The preference, execution-control, and corpus tests expect compiled files in
+`out/`, so run `npm run compile` first. The packaging command creates
 `test-smell-detector.vsix`.
 
 GitHub Actions runs these checks for pull requests targeting `main`, pushes to
