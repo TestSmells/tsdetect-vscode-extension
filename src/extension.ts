@@ -6,9 +6,11 @@ import {
   isLikelyJavaTestDocument,
   ProductionFileResolver,
 } from './productionFileResolver';
+import { getSmellDefinition } from './smellCatalog';
 import { DetectorFinding, runDetector } from './testSmellDetector';
 
 const ANALYZE_CURRENT_FILE_COMMAND = 'testSmellDetector.analyzeCurrentFile';
+const LEARN_ABOUT_SMELL_COMMAND = 'testSmellDetector.learnAboutSmell';
 const DIAGNOSTIC_SOURCE = 'Test Smell Detector';
 const ANALYSIS_DEBOUNCE_MILLISECONDS = 500;
 
@@ -97,7 +99,7 @@ function createDiagnostics(
     const mappedRange = getFindingRange(document, finding);
     const range = mappedRange ?? fallbackRange;
     const message = mappedRange
-      ? `${finding.name} detected in ${finding.scope} ${finding.elementName}. The underline marks the affected declaration.`
+      ? `${finding.name} detected in ${finding.scope} ${finding.elementName}.`
       : `${finding.name} detected in this test file (exact source location unavailable).`;
     const diagnostic = new vscode.Diagnostic(
       range,
@@ -427,6 +429,62 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
+  const learnAboutSmell = vscode.commands.registerCommand(
+    LEARN_ABOUT_SMELL_COMMAND,
+    (smellName: unknown) => {
+      if (typeof smellName !== 'string' || smellName.length === 0) {
+        return;
+      }
+
+      void vscode.window.showInformationMessage(
+        `${smellName}\n\n${getSmellDefinition(smellName)}`,
+        { modal: true },
+      );
+    },
+  );
+
+  const learnAboutSmellActions = vscode.languages.registerCodeActionsProvider(
+    { language: 'java', scheme: 'file' },
+    {
+      provideCodeActions: (_document, _range, actionContext) => {
+        const diagnosticsBySmell = new Map<string, vscode.Diagnostic[]>();
+
+        for (const diagnostic of actionContext.diagnostics) {
+          if (
+            diagnostic.source !== DIAGNOSTIC_SOURCE ||
+            typeof diagnostic.code !== 'string'
+          ) {
+            continue;
+          }
+
+          const matchingDiagnostics =
+            diagnosticsBySmell.get(diagnostic.code) ?? [];
+          matchingDiagnostics.push(diagnostic);
+          diagnosticsBySmell.set(diagnostic.code, matchingDiagnostics);
+        }
+
+        return [...diagnosticsBySmell].map(
+          ([smellName, matchingDiagnostics]) => {
+            const action = new vscode.CodeAction(
+              `Learn about ${smellName}`,
+              vscode.CodeActionKind.QuickFix,
+            );
+            action.command = {
+              command: LEARN_ABOUT_SMELL_COMMAND,
+              title: `Learn about ${smellName}`,
+              arguments: [smellName],
+            };
+            action.diagnostics = matchingDiagnostics;
+            return action;
+          },
+        );
+      },
+    },
+    {
+      providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
+    },
+  );
+
   const analyzeAfterSave = vscode.workspace.onDidSaveTextDocument(
     scheduleIncrementalAnalysis,
   );
@@ -471,6 +529,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     analyzeCurrentFile,
+    learnAboutSmell,
+    learnAboutSmellActions,
     analyzeAfterSave,
     invalidateAfterChange,
     cleanUpClosedDocument,
